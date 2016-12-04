@@ -39,7 +39,7 @@ cs <- mtxg[,2]
 
 zcs2gs <- f_zcs2gs(cs,mtxg)
 f_zg2cs <- function(ga,zs2gs){
-  a <- cor.test(zcs2gs,ga) ### logistic regression, anova, cor.tes, bayeslm, and t.test. anova/cor.test are identical and is the best.
+  a <- cor.test(zcs2gs,ga) # logistic regression, anova, cor.tes, bayeslm, and t.test. anova/cor.test are identical and is the best.
   p <- a$p.value
   s <- ifelse(a$estimate>1,1,-1)
   c(z=s*qnorm(p/2,lower.tail = F),p=p)
