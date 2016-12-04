@@ -1,0 +1,65 @@
+---
+title: "simple_DEPICT"
+author: "Chen"
+date: "2016年12月3日"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# GSEA STEP
+
+## annotation matrix
+
+```{r, eval=TRUE}
+mtxg <- matrix(0,nrow=100,ncol=20)
+mtxg[sample(1:2000,300)] <- 1 
+image(mtxg)
+colnames(mtxg)<-paste("gset",1:20,sep="_")
+
+gene <- numeric(100)
+gene[sample(1:100,20)] <- 1
+
+
+f_zgene2gs <- function(gene,mtxg){
+  apply(mtxg,2,function(x){
+  x=factor(x,levels = c(0,1));
+  y=factor(gene,levels = c(0,1));
+  f <- fisher.test(table(gene,x))
+  p <- f$p.value
+  s <- ifelse(f$estimate>1,1,-1)
+  s*qnorm(p/2,lower.tail = F)
+  })
+}
+
+gene1 <- mtxg[,2]
+gene2 <- mtxg[,3]
+gene3 <- mtxg[,4]
+
+g1 <- f_zgene2gs(gene1,mtxg)
+g2 <- f_zgene2gs(gene2,mtxg)
+g3 <- f_zgene2gs(gene2,mtxg)
+
+x<-c(1,1,1,1,0,0,0,0)
+y<-c(1,1,1,1,1,1,0,0)
+
+cor.test(x,y)
+
+fisher.test(table(x,y))
+
+x
+
+
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
