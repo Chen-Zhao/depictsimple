@@ -1,7 +1,7 @@
 ---
-title: "simple_DEPICT"
-author: "Chen"
-date: "2016年12月3日"
+title: "metaRLS3_c02_depictSim"
+author: "chen"
+date: "2 12 2016"
 output: html_document
 ---
 
@@ -9,11 +9,30 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+## R Markdown 
+
+```{r, eval=FALSE}
+
+## p-value background,
+
+1. 1000 times GWAS permutation test
+2. map to genes based on loci and marker
+3. calculate gsea z-score,
+4. calculate tissue z-score
+5. prioritization
+5.1 z-score from gene to all sig loci gene set
+5.2 gene density match loci for bias correction
+5.2 scoring and bias adjustment by experimentary FDR
+
+
+```
+
+
 # GSEA STEP
 
 ## annotation matrix
 
-```{r, eval=TRUE}
+```{r, eval=FALSE}
 mtxg <- matrix(0,nrow=100,ncol=20)
 mtxg[sample(1:2000,300)] <- 1 
 image(mtxg)
@@ -38,29 +57,191 @@ cs <- mtxg[,2]
 
 
 zcs2gs <- f_zcs2gs(cs,mtxg)
-f_zg2cs <- function(ga,zs2gs){
+f_zg2cs <- function(ga,zcs2gs){
   a <- cor.test(zcs2gs,ga) # logistic regression, anova, cor.tes, bayeslm, and t.test. anova/cor.test are identical and is the best.
   p <- a$p.value
-  s <- ifelse(a$estimate>1,1,-1)
+  s <- ifelse(a$estimate>0,1,-1)
   c(z=s*qnorm(p/2,lower.tail = F),p=p)
 }
 
 ga <- mtxg[which(cs==1)[1],]
 
 
+```
+
+## RLS Data
+
+```{r, eval=FALSE}
+
+cd /home/chenzhao/projects/metaRLS3/04annotation/depictsimple
+cp ../../06highlevel/MAGMA/HGNC_UNIPROTKeywords.AnnoInBP.gset.txt ./ 
+tr ' ' '\t' < HGNC_UNIPROTKeywords.AnnoInBP.gset.txt > HGNC_UNIPROTKeywords.AnnoInBP.gset.tab
+cut -f 1 HGNC_UNIPROTKeywords.AnnoInBP.gset.tab | paste - HGNC_UNIPROTKeywords.AnnoInBP.gset.tab | awk '{print "UNIKB_"$0}' - > HGNC_UNIPROTKeywords.AnnoInBP.gset.gmt
+cat HGNC_UNIPROTKeywords.AnnoInBP.gset.gmt c2.all.v5.2.symbols.gmt > all.gmt
+
+R
+
+msigdb <- readLines(con="all.gmt")
+
+anno <- as.character(sapply(msigdb,function(x){strsplit(x,"\t")[[1]][1]}))
+genes <- unique(sort(unlist(lapply(msigdb,function(x){strsplit(x,"\t")[[1]][-c(1:2)]}))))
+
+annotation_matrix <- matrix(0,nrow=length(genes),ncol=length(msigdb))
+annotation_matrix_idx <- unlist(lapply(1:length(msigdb),function(x){
+  l <- msigdb[x];
+  l <- strsplit(l,"\t")[[1]];
+  id <- match(l[-c(1:2)],genes)
+  as.numeric(rbind(id,x))
+}))
+annotation_matrix_idx_mx <- matrix(annotation_matrix_idx,ncol=2,byrow = T)
+annotation_matrix[annotation_matrix_idx_mx] <- 1
+colnames(annotation_matrix) <- anno
+rownames(annotation_matrix) <- genes
+hist(apply(annotation_matrix,2,sum))
 
 
-x<-c(1,1,1,1,0,0,0,0)
-y<-c(1,1,1,1,1,1,0,0)
+# RLS data
 
-cor.test(x,y)
+## annotation 
+### header snp gene tissue type
+f_zcs2gs <- function(cs,mtxg){
+  apply(mtxg,2,function(x){
+  x=factor(x,levels = c(0,1));
+  y=factor(cs,levels = c(0,1));
+  f <- fisher.test(table(cs,x))
+  p <- f$p.value
+  s <- ifelse(f$estimate>1,1,-1)
+  s*qnorm(p/2,lower.tail = F)
+  })
+}
+f_zcs2gs_mc <- function(cs,mtxg,ncores=8){
+  require(parallel)
+  z <- mclapply(1:ncol(mtxg),function(x){
+    x<-mtxg[,x]
+    x=factor(x,levels = c(0,1));
+    y=factor(cs,levels = c(0,1));
+    f <- fisher.test(table(cs,x))
+    p <- f$p.value
+    s <- ifelse(f$estimate>1,1,-1)
+    s*qnorm(p/2,lower.tail = F)
+  },mc.cores=ncores)
+  unlist(z)
+}
+f_zg2cs <- function(ga,zcs2gs){
+  a <- cor.test(zcs2gs,ga) # logistic regression, anova, cor.tes, bayeslm, and t.test. anova/cor.test are identical and is the best.
+  p <- a$p.value
+  s <- ifelse(a$estimate>0,1,-1)
+  c(z=s*qnorm(p/2,lower.tail = F),p=p)
+}
 
-fisher.test(table(x,y))
 
-x
+
+cs <- read.table("geneset.test",sep="\t",header = F,stringsAsFactors = F)
+csv <- match(genes,cs[[1]])
+csv[!is.na(csv)]<- 1
+csv[is.na(csv)] <- 0
+
+#zcs2gs <- f_zcs2gs(csv, annotation_matrix)
+#zcs2gs_table <- data.frame(anno,zcs2gs)
+#zcs2gs_table[order(zcs2gs_table[,2],decreasing = T),][1:20,]
+#zg2cs <- apply(annotation_matrix[which(csv==1),],1,f_zg2cs,zcs2gs=zcs2gs)
+
+# use pca regression
+#library(devtools)
+#install_github("gabraham/flashpca/flashpcaR")
+# git clone 
+# vi src/Makeenv to openmp
+# PKG_CPPFLAGS=-fopenmp
+# PKG_LIBS=-fopenmp
+
+library(flashpcaR)
+
+s = ncol(annotation_matrix)
+amtx <- annotation_matrix
+pca <- flashpca(amtx,method="svd",stand="binom",ndim=s,do_loadings = TRUE, num_threads=12)
+save(pca,file="pca.alldim.Rda")
+plot(cumsum(pca$values)/sum(pca$values))
+
+which(csv==1)
+genes[which(csv==1)]
+
+pv <- sapply(which(csv==1),function(i){
+  gia  <- annotation_matrix[i,1:s]
+  gil  <- ((gia-pca$center)/pca$scale)%*%pca$loadings
+  zl <- ((zcs2gs[1:s]-pca$center)/pca$scale)%*%pca$loadings
+  cor.test(gil,zl)$p.value
+})
+
+genepv <- data.frame(genes[which(csv==1)],pv)
+genepv[order(genepv[,2]),]
+
+which(csv==1)
+genes[which(csv==1)]
+which(amtx[7093,]==1)
+anno[which(amtx[7093,]==1)]
+genes[which(amtx[,which(amtx[7093,]==1)]==1)]
+plot()
+
+
+anno[which(zcs2gs>qnorm(1e-3,lower.tail=F))]
+geneset <- cs[[1]]
+geneset <- intersect(geneset,genes)
+f_prioritizedgene <- function(geneset,annotation_matrix,pca,ncores=12){
+  require(parallel)
+  allgenes <- rownames(annotation_matrix)
+##### remove gene-self
+#  zcs2gs_mtx <- mclapply(geneset,function(x){
+#      csv <- match(allgenes,setdiff(geneset,x))
+#      csv[!is.na(csv)]<- 1
+#      csv[is.na(csv)] <- 0 
+#      zcs2gs <- f_zcs2gs(csv, annotation_matrix)
+#      zcs2gs
+#  },mc.cores=ncores)
+#  zcs2gs_mtx <- t(sapply(zcs2gs_mtx,function(x){x}))
+#  rownames(zcs2gs_mtx) <- geneset
+#  zfunsim <- t(sapply(geneset,function(i){
+#    gia  <- annotation_matrix[i,1:s]
+#    gil  <- ((gia-pca$center)/pca$scale)%*%pca$loadings
+#    zl <- ((as.numeric(zcs2gs_mtx[i,s])-pca$center)/pca$scale)%*%pca$loadings
+#    ggsettest <- cor.test(gil,zl)
+#    if(pt(ggsettest$statistic,ggsettest$parameter,lower.tail=F)==0){
+#      p <- 1e-323
+#    }else{
+#      p <- pt(ggsettest$statistic,ggsettest$parameter,lower.tail=F)
+#    }
+#    z <- qnorm(p,lower.tail=F)
+#    z <- ifelse(ggsettest$statistic>0,z,z*-1)
+#    c(z=z,p=p)
+#  }))
+  csv <- match(allgenes,geneset)
+  csv[!is.na(csv)]<- 1
+  csv[is.na(csv)] <- 0 
+  zcs2gs <- f_zcs2gs_mc(csv, annotation_matrix,ncores ) 
+  zfunsim <- t(sapply(geneset,function(i){
+    gia  <- annotation_matrix[i,1:s]
+    gil  <- ((gia-pca$center)/pca$scale)%*%pca$loadings
+    zl <- ((as.numeric(zcs2gs)[1:s]-pca$center)/pca$scale)%*%pca$loadings
+    ggsettest <- cor.test(gil,zl)
+    if(pt(abs(ggsettest$statistic),ggsettest$parameter,lower.tail=F)==0){
+      p <- 1e-323
+    }else{
+      p <- pt(abs(ggsettest$statistic),ggsettest$parameter,lower.tail=F)*2
+    }
+    z <- qnorm(p/2,lower.tail=F)
+    z <- ifelse(ggsettest$statistic>0,z,z*-1)
+    c(z=z,p=p)
+  }))
+  
+}
+
+### found new correlation in kegg pathway NTNG1 and SEMA6D
+
+
 
 
 ```
+
+
 
 ## Including Plots
 
